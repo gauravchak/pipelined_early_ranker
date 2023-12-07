@@ -1,2 +1,3 @@
 # pipelined_early_ranker
-Pipelined early ranker in a recommender system
+A pipelined baseline early ranker in a recommender system
+
