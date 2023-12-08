@@ -22,14 +22,30 @@ class CandidateGeneratorService:
         self,
         max_num_lsr: int,
         lsr_sufficiency_threshold: float,
+        enable_esr: bool,
         max_num_esr: int,
         lsr_batch_size: int,
         weights: dict,
     ) -> None:
+        """
+        Initializes the object with the specified parameters.
+
+        Parameters:
+        - max_num_lsr (int): The maximum number of candidates to be sent to late stage ranker (LSR).
+        - lsr_sufficiency_threshold (float): At what user value score is a candidate eligible to sent directly to LSR.
+        - enable_esr (bool): Flag to enable or disable a separate early stage ranking model (ESR).
+        - max_num_esr (int): The maximum number of candidates to be sent to early stage ranker (ESR) if enable_esr=True
+        - lsr_batch_size (int): The batch size for LSR model, so that we don't send very few candidates to LSR.
+        - weights (dict): A dictionary containing weights for different generators.
+            Weights are sort of linear model to infer user value from each recommended item.
+        """
         self.max_num_lsr = max_num_lsr
         self.lsr_sufficiency_threshold = lsr_sufficiency_threshold
+        self.enable_esr = enable_esr
         self.max_num_esr = max_num_esr
         self.lsr_batch_size = lsr_batch_size
+        self.weights = weights  # noqa Dictionary to store weights for each generator
+
         self.uv_dict = {}
         self.num_lsr_sent = 0
         self.items_waiting_for_lsr = (
@@ -38,7 +54,6 @@ class CandidateGeneratorService:
         self.already_sent = (
             {}
         )  # noqa Dictionary to track items that have already been sent
-        self.weights = weights  # noqa Dictionary to store weights for each generator
 
     def OnGeneratorCompletion(
         self,
@@ -83,15 +98,18 @@ class CandidateGeneratorService:
         return w0 * 1 / log2(max(1 + rank, 2)) + w1 * score + w2
 
     def OnTimeOut(self):
-        # self.send_to_late_stage_ranker()
-        top_K_items = sorted(self.uv_dict.items(), key=lambda x: x[1], reverse=True)
-        top_K_items = [
-            (item_id, value)
-            for item_id, value in top_K_items
-            if item_id not in self.already_sent
-        ]
-        top_K_items = top_K_items[: self.max_num_esr]
-        self.send_to_early_stage_ranker(top_K_items)
+        if not self.enable_esr:
+            # Send remaining candidates to LSR since ESR route closed
+            self.send_to_late_stage_ranker()
+        else:
+            top_K_items = sorted(self.uv_dict.items(), key=lambda x: x[1], reverse=True)
+            top_K_items = [
+                (item_id, value)
+                for item_id, value in top_K_items
+                if item_id not in self.already_sent
+            ]
+            top_K_items = top_K_items[: self.max_num_esr]
+            self.send_to_early_stage_ranker(top_K_items)
 
     def send_to_early_stage_ranker(self, top_K_items):
         print(f"Sending to early stage ranker: {top_K_items}")
@@ -102,6 +120,7 @@ class CandidateGeneratorService:
 # Example usage:
 max_num_lsr: int = 10
 lsr_sufficiency_threshold: float = 1.1
+enable_esr: bool = True
 max_num_esr: int = 5
 lsr_batch_size: int = 3
 
@@ -113,7 +132,12 @@ weights = {
 }
 
 candidate_generator_service = CandidateGeneratorService(
-    max_num_lsr, lsr_sufficiency_threshold, max_num_esr, lsr_batch_size, weights
+    max_num_lsr=max_num_lsr,
+    lsr_sufficiency_threshold=lsr_sufficiency_threshold,
+    enable_esr=enable_esr,
+    max_num_esr=max_num_esr,
+    lsr_batch_size=lsr_batch_size,
+    weights=weights,
 )
 
 # Example 1
